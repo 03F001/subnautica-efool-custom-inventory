@@ -11,6 +11,8 @@ using BepInEx.Logging;
 
 using Nautilus.Handlers;
 using Nautilus.Utility;
+using UnityEngine.SceneManagement;
+using UnityEngine.Events;
 
 namespace org.efool.subnautica.custom_inventory {
 
@@ -44,6 +46,8 @@ public class Plugin : BaseUnityPlugin
 		SaveUtils.RegisterOnQuitEvent(() => optionsMenu.inGame = false);
 
 		ConsoleCommandsHandler.RegisterConsoleCommands(typeof(Commands));
+
+		SceneManager.sceneLoaded += new UnityAction<Scene, LoadSceneMode>(Patch.evtSceneLoaded);
 
 		new Harmony(FQN).PatchAll();
 	}
@@ -400,38 +404,187 @@ class Patch
 		__instance.GetComponentInParent<ScrollRect>(true)?.gameObject.SetActive(false);
 	}
 
-	[HarmonyPrefix]
-	[HarmonyPatch(typeof(Inventory), nameof(Inventory.ExecuteItemAction), typeof(InventoryItem), typeof(int))]
-	public static bool Inventory_ExecuteItemAction(Inventory __instance, InventoryItem item, int button)
+	private static string getId(InventoryItem item)
 	{
-		var itemAction = __instance.GetItemAction(item, button);
-		if ( itemAction == ItemAction.Switch && !(item.container is Equipment) ) {
+		return item.item.GetComponent<UniqueIdentifier>().Id;
+	}
+
+	private static bool isPinned(InventoryItem item)
+	{
+		return Plugin.game.inventoryPinnedItems.Contains(getId(item));
+	}
+
+	private static void pin(InventoryItem item)
+	{
+		Plugin.game.inventoryPinnedItems.Add(getId(item));
+	}
+
+	private static void unpin(InventoryItem item)
+	{
+		Plugin.game.inventoryPinnedItems.Remove(getId(item));
+	}
+
+	private static GameObject _pinReference;
+	public static void evtSceneLoaded(Scene scene, LoadSceneMode mode)
+	{
+		if ( _pinReference == null && Player.main != null ) {
+			var tab = Player.main.GetPDA().ui.tabJournal as uGUI_BlueprintsTab;
+			var pin = tab.prefabPin.gameObject.FindChild("Pin");
+			var container = (Player.main.GetPDA().ui.tabInventory as uGUI_InventoryTab).inventory;
+			_pinReference = UnityEngine.Object.Instantiate<GameObject>(pin);
+			_pinReference.name = "Pin";
+			var x = _pinReference.transform as RectTransform;
+			x.anchorMin     = new Vector2(0.1f, 1);
+			x.anchorMax     = new Vector2(0.1f, 1);
+			x.pivot         = new Vector2(0.1f, 1);
+			x.offsetMin     = new Vector2(0, -30);
+			x.offsetMax     = new Vector2(35, 0);
+			x.localPosition = new Vector3(0, 0, 0);
+			_pinReference.SetActive(false);
+		}
+	}
+
+	private static void applyEffectPin(uGUI_ItemsContainer container, InventoryItem item, bool on = true)
+	{
+		if ( _pinReference == null )
+			return;
+
+		var icon = container.GetIcon(item);
+		if ( icon == null )
+			return;
+
+		if ( on ) {
+			RectTransform rectTransform = UnityEngine.Object.Instantiate<GameObject>(_pinReference, icon.rectTransform).GetComponent<RectTransform>();
+			rectTransform.gameObject.name = "Pin";
+			rectTransform.gameObject.SetActive(true);
+		}
+		else {
+			var pin = icon.gameObject.FindChild("Pin");
+			if ( pin != null )
+				GameObject.Destroy(pin);
+		}
+	}
+
+	[HarmonyPostfix]
+	[HarmonyPatch(typeof(uGUI_ItemsContainer), "OnAddItem")]
+	public static void uGUI_ItemsContainer_OnAddItem(uGUI_ItemsContainer __instance, InventoryItem item)
+	{
+		applyEffectPin(__instance, item, isPinned(item));
+	}
+
+	private static void handlePinItemAction(InventoryItem item)
+	{
+		var container = item.container as ItemsContainer;
+		if ( item.container is Equipment )
+			return;
+
+		var itemPinned = isPinned(item);
+		var targetItems = new List<InventoryItem>();
+		if ( Plugin.config.keyMoveAllItems.GetKeyHeld() ) {
+			foreach ( var e in container )
+				if ( isPinned(e) == itemPinned )
+					targetItems.Add(e);
+		}
+		else if ( Plugin.config.keyMoveAllItemType.GetKeyHeld() ) {
+			foreach ( var e in container.GetItems(item.item.GetTechType()) )
+				if ( isPinned(e) == itemPinned )
+					targetItems.Add(e);
+		}
+		else {
+			targetItems.Add(item);
+		}
+
+		// subnautica APIs don't allow for multi-processing lists
+		if ( itemPinned ) {
+			foreach ( var e in targetItems ) {
+				unpin(e);
+				foreach ( var c in Plugin.FindObjectsOfType<uGUI_ItemsContainer>() )
+					applyEffectPin(c, e, false);
+			}
+		}
+		else {
+			foreach ( var e in targetItems ) {
+				pin(e);
+				foreach ( var c in Plugin.FindObjectsOfType<uGUI_ItemsContainer>() )
+					applyEffectPin(c, e, true);
+			}
+		}
+	}
+
+	private static void handleItemAction(InventoryItem item, ItemAction itemAction)
+	{
+		var targetItems = new List<InventoryItem>();
+		if ( Plugin.config.keyMoveAllItems.GetKeyHeld() ) {
+			foreach ( var e in item.container )
+				if ( !isPinned(e) )
+					targetItems.Add(e);
+		}
+		else {
 			var container = item.container as ItemsContainer;
-			var items = new List<InventoryItem>();
-			if ( Plugin.config.keyMoveAllItems.GetKeyHeld() ) {
-				foreach ( var itemType in container.GetItemTypes() )
-					container.GetItems(itemType, items);
+			if ( container != null && Plugin.config.keyMoveAllItemType.GetKeyHeld() ) {
+				foreach ( var e in container.GetItems(item.item.GetTechType()) )
+					if ( !isPinned(e) )
+						targetItems.Add(e);
 			}
-			else if ( Plugin.config.keyMoveAllItemType.GetKeyHeld() ) {
-				container.GetItems(item.item.GetTechType(), items);
-			}
-
-			if ( items.Count > 0 ) {
-				foreach ( var e in items ) {
-					if ( !e.CanDrag(false) )
-						continue;
-
-					var dst = __instance.GetOppositeContainer(e);
-					if ( dst != null && !(dst is Equipment) )
-						Inventory.AddOrSwap(e, dst);
-				}
-
-				return false;
+			else {
+				targetItems.Add(item);
 			}
 		}
 
-		__instance.ExecuteItemAction(itemAction, item);
+		foreach ( var e in targetItems )
+			Inventory.main.ExecuteItemAction(itemAction, e);
+	}
+
+	[HarmonyPrefix]
+	[HarmonyPatch(typeof(uGUI_InventoryTab), nameof(uGUI_InventoryTab.OnPointerClick))]
+	public static bool uGUI_InventoryTab_OnPointerClick(uGUI_InventoryTab __instance, InventoryItem item, int button)
+	{
+		if ( ItemDragManager.isDragging )
+			return false;
+
+		var itemAction = Inventory.main.GetItemAction(item, button);
+		if ( Plugin.config.keyPinItem.GetKeyHeld() ) {
+			if ( button == 0 )
+				handlePinItemAction(item);
+		}
+		else if ( itemAction != ItemAction.None && !isPinned(item) ) {
+			handleItemAction(item, itemAction);
+		}
+
+		__instance.equipment.ExtinguishSlots();
+
+		if ( itemAction != ItemAction.None || GameInput.GetPrimaryDevice() != GameInput.Device.Controller || button != 1 )
+			return false;
+
+		Player.main.GetPDA().Close();
 		return false;
+	}
+
+	[HarmonyPrefix]
+	[HarmonyPatch(typeof(InventoryItem), nameof(InventoryItem.CanDrag))]
+	public static bool InventoryItem_CanDrag(ref bool __result, InventoryItem __instance, bool verbose)
+	{
+		if ( isPinned(__instance) ) {
+			__result = false;
+			return false;
+		}
+
+		return true;
+	}
+
+	[HarmonyPostfix]
+	[HarmonyPatch(typeof(Inventory), nameof(Inventory.GetAllItemActions))]
+	public static void Inventory_GetAllItemActions(ref ItemAction __result, Inventory __instance, InventoryItem item)
+	{
+		const ItemAction disallowed = ItemAction.Use
+			| ItemAction.Eat
+			| ItemAction.Equip
+			| ItemAction.Unequip
+			| ItemAction.Switch
+			| ItemAction.Swap
+			| ItemAction.Drop;
+		if ( isPinned(item) )
+			__result = __result & ~disallowed;
 	}
 }
 

@@ -306,6 +306,8 @@ public class ConfigGlobal : ConfigFile
 	public KeyCode keyMoveAllItemType = KeyCode.LeftControl;
 	[Keybind("Move all items")]
 	public KeyCode keyMoveAllItems = KeyCode.LeftShift;
+	[Keybind("Pin item")]
+	public KeyCode keyPinItem = KeyCode.LeftAlt;
 
 	public void syncItemsContainer(uGUI_ItemsContainer itemsContainer)
 	{
@@ -429,6 +431,10 @@ public class ConfigPerSave : SaveDataCache
 	[Slider("Indoor Growbed Height"           , 1, max, Step = 1, DefaultValue = max)] public int planterbox_height   = 4;
 	[Slider("Alien Containment Planter Width" , 1, 8  , Step = 1, DefaultValue = 4  )] public int planter_width       = 4;
 	[Slider("Alien Containment Planter Height", 1, max, Step = 1, DefaultValue = max)] public int planter_height      = 4;
+
+	// pinned inventory
+
+	public HashSet<string> inventoryPinnedItems = new HashSet<string>();
 }
 
 public static class Commands
