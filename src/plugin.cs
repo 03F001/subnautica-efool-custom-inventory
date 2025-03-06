@@ -474,6 +474,9 @@ class Patch
 
 	private static void handlePinItemAction(InventoryItem item)
 	{
+		if ( !item.isEnabled )
+			return;
+
 		var container = item.container as ItemsContainer;
 		if ( item.container is Equipment )
 			return;
