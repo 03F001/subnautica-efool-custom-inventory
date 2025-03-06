@@ -3,6 +3,8 @@ using System.Collections.Generic;
 
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.SceneManagement;
+using UnityEngine.Events;
 
 using HarmonyLib;
 
@@ -11,22 +13,21 @@ using BepInEx.Logging;
 
 using Nautilus.Handlers;
 using Nautilus.Utility;
-using UnityEngine.SceneManagement;
-using UnityEngine.Events;
 
 namespace org.efool.subnautica.custom_inventory {
 
-[BepInPlugin(FQN, "efool's Custom Inventory", "0.0.1")]
+[BepInPlugin(
+	org.efool.subnautica.custom_inventory.Info.FQN,
+	org.efool.subnautica.custom_inventory.Info.title,
+	org.efool.subnautica.custom_inventory.Info.version)]
 [BepInDependency("com.snmodding.nautilus")]
 public class Plugin : BaseUnityPlugin
 {
-	public const string FQN = "org.efool.subnautica.custom_inventory";
-	public static ManualLogSource log { get; } = BepInEx.Logging.Logger.CreateLogSource("efool");
-
 	public static ConfigGlobal config { get; private set;}
 	public static OptionsMenu optionsMenu { get; private set; }
 	public static ConfigPerSave game { get; } = SaveDataHandler.RegisterSaveDataCache<ConfigPerSave>();
 
+	public static ManualLogSource log;
 	public static void debug(string txt)
 	{
 #if DEBUG
@@ -36,6 +37,8 @@ public class Plugin : BaseUnityPlugin
 
 	private void Awake()
 	{
+		log = Logger;
+
 		config = new ConfigGlobal();
 		config.Load();
 
@@ -49,12 +52,12 @@ public class Plugin : BaseUnityPlugin
 
 		SceneManager.sceneLoaded += new UnityAction<Scene, LoadSceneMode>(Patch.evtSceneLoaded);
 
-		new Harmony(FQN).PatchAll();
+		new Harmony(org.efool.subnautica.custom_inventory.Info.FQN).PatchAll();
 	}
 }
 
 [HarmonyPatch]
-class Patch
+static class Patch
 {
 	[HarmonyPostfix]
 	[HarmonyPatch(typeof(uGUI_OptionsPanel), nameof(uGUI_OptionsPanel.OnSave))]
@@ -213,7 +216,7 @@ class Patch
 #endif
 	}
 
-#if DEBUG
+#if DUMP
 	[HarmonyPrefix]
 	[HarmonyPatch(typeof(StorageContainer), nameof(StorageContainer.Open), typeof(Transform))]
 	public static void StorageContainer_Open(StorageContainer __instance, Transform useTransform)
@@ -262,7 +265,6 @@ class Patch
 	[HarmonyPatch(typeof(SeamothStorageContainer), "Init")]
 	public static void SeamothStorageContainer_Init(SeamothStorageContainer __instance)
 	{
-		Plugin.debug($"Init SeaMoth storage: {__instance.name}");
 		if ( __instance.name.StartsWith("SeamothStorageModule") ) {
 			__instance.width = Plugin.game.seamoth_width;
 			__instance.height = Plugin.game.seamoth_height;
@@ -288,29 +290,8 @@ class Patch
 			return new Vector2(w * uGUI_ItemsContainer.CellWidth + Plugin.config.viewMargin, h * uGUI_ItemsContainer.CellHeight + Plugin.config.viewMargin);
 		}
 
-		public static void DumpRectTransform(string name, RectTransform r)
-		{
-			Plugin.debug(name + ": "
-				+ "  anchorMin=" + r.anchorMin
-				+ "  anchorMax=" + r.anchorMax
-				+ "  pivot=" + r.pivot
-				+ "  anchoredPosition=" + r.anchoredPosition
-				+ "  sizeDelta=" + r.sizeDelta
-				+ "  localPosition=" + r.localPosition
-				+ "  localRotation=" + r.localRotation
-				+ "  localScale=" + r.localScale
-				);
-		}
-
-		public static void DumpRect(string name, Rect r)
-		{
-			Plugin.debug(name + ": x=" + r.x + " y=" + r.y + " w=" + r.width + " h=" + r.height);
-		}
-
 		public static ScrollRect inject(uGUI_ItemsContainer __instance, string name)
 		{
-			Plugin.debug("Installing ScrollPane");
-
 			GameObject scrollObject = new GameObject() { name = name };
 			scrollObject.transform.SetParent(__instance.transform.parent);
 			var viewport = scrollObject.AddComponent<RectTransform>();

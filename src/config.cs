@@ -23,10 +23,10 @@ public class OptionsMenu : ModOptions
 	private ConfigPerSave _custom = new ConfigPerSave();
 	private ConfigPerSave _current;
 
-	public bool inGame = false;
+	public bool inGame { get; set; } = false;
 
 	public OptionsMenu(object inst)
-		: base("efool's Custom Inventory")
+		: base(Info.title)
 	{
 		foreach ( var field in inst.GetType().GetFields() ) {
 			switch ( field.GetCustomAttribute<ModOptionAttribute>() ) {
@@ -115,7 +115,7 @@ public class OptionsMenu : ModOptions
 		if ( !inGame )
 			return;
 
-		panel.AddHeading(modsTabIndex, "efool's Custom Inventory Per Save Options");
+		panel.AddHeading(modsTabIndex, Info.title + " Per Save Options");
 		var presetConfigs = new List<ConfigPerSave> {
 			_default,
 			_custom,
@@ -260,7 +260,7 @@ public class OptionsMenu : ModOptions
 	}
 }
 
-[Menu("efool's Custom Inventory")]
+[Menu(Info.title)]
 public class ConfigGlobal : ConfigFile
 {
 	[Slider("Inventory Max View Width", 6, 8, DefaultValue = 6), OnChange(nameof(syncScrollPanes))]
@@ -342,7 +342,7 @@ public class ConfigGlobal : ConfigFile
 	}
 }
 
-[FileName("efool-custom-inventory")]
+[FileName(Info.name)]
 public class ConfigPerSave : SaveDataCache
 {
 	/* The extreme DefaultValue is to mitigate subnautica defect in sliders where it snaps to the default value
