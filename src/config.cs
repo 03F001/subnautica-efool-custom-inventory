@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 
 using UnityEngine;
@@ -68,10 +69,6 @@ public class OptionsMenu : ModOptions
 
 		return 0;
 	}
-	public static float readSliderField(object obj, int idx)
-	{
-		return readSliderField(obj, obj.GetType().GetFields()[idx]);
-	}
 
 	public static void writeSliderField(object obj, FieldInfo field, float value)
 	{
@@ -81,31 +78,11 @@ public class OptionsMenu : ModOptions
 			field.SetValue(obj, (int)value);
 	}
 
-	public static void writeSliderField(object obj, int idx, float value)
-	{
-		writeSliderField(obj, obj.GetType().GetFields()[idx], value);
-	}
-
-	public static void copy<T>(T dst, T src) where T : class
-	{
-		foreach ( var field in typeof(T).GetFields(BindingFlags.Instance | BindingFlags.DeclaredOnly | BindingFlags.Public) )
-			field.SetValue(dst, field.GetValue(src));
-	}
-
-	public static bool equal<T>(T lhs, T rhs) where T : class
-	{
-		foreach ( var field in typeof(T).GetFields(BindingFlags.Instance | BindingFlags.DeclaredOnly | BindingFlags.Public) )
-			if ( !field.GetValue(lhs).Equals(field.GetValue(rhs)) )
-				return false;
-
-		return true;
-	}
-
 	public void loadCurrent()
 	{
 		if ( _current == null ) {
 			_current = new ConfigPerSave();
-			copy(_current, Plugin.game);
+			_current.copySettings(Plugin.game);
 		}
 	}
 
@@ -128,7 +105,7 @@ public class OptionsMenu : ModOptions
 		const int customPresetIdx = 1;
 		
 		{
-			copy(_custom, Plugin.game);
+			_custom.copySettings(Plugin.game);
 
 			var presetsPath = Path.Combine(Path.GetDirectoryName(typeof(Plugin).Assembly.Location), "presets.json");
 			if ( File.Exists(presetsPath) ) {
@@ -141,14 +118,14 @@ public class OptionsMenu : ModOptions
 		}
 
 		var presetIdx = 0;
-		if ( !Plugin.game.Equals(_default) ) {
-			presetIdx = presetConfigs.FindIndex(customPresetIdx + 1, x => equal(x, Plugin.game));
+		if ( !Plugin.game.equalSettings(_default) ) {
+			presetIdx = presetConfigs.FindIndex(customPresetIdx + 1, x => x.equalSettings(Plugin.game));
 			if ( presetIdx == -1 )
 				presetIdx = customPresetIdx;
 		}
 
-		var fields = _custom.GetType().GetFields(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
-		var sliders = new uGUI_SnappingSlider[fields.Length];
+		var fields = ConfigPerSave.fieldsSettings;
+		var sliders = new uGUI_SnappingSlider[fields.Count];
 
 		bool suppressChangeEvent = false;
 		UnityAction<int> onPreset = (int idx) => {
@@ -158,14 +135,14 @@ public class OptionsMenu : ModOptions
 			loadCurrent();
 			suppressChangeEvent = true;
 			for ( int i = 0; i < sliders.Length; ++i )
-				sliders[i].value = readSliderField(presetConfigs[idx], i);
+				sliders[i].value = readSliderField(presetConfigs[idx], fields[i]);
 			suppressChangeEvent = false;
 
-			copy(_current, presetConfigs[idx]);
+			_current.copySettings(presetConfigs[idx]);
 		};
 		var presetObject = panel.AddChoiceOption(modsTabIndex, "Preset", presets.ToArray(), presetIdx, callback: onPreset).GetComponentInChildren<uGUI_Choice>();
 
-		for ( int fieldIdx = 0; fieldIdx < fields.Length; ++fieldIdx ) {
+		for ( int fieldIdx = 0; fieldIdx < fields.Count; ++fieldIdx ) {
 			switch ( fields[fieldIdx].GetCustomAttribute<ModOptionAttribute>() ) {
 			case SliderAttribute attr:
 				int sliderIdx = fieldIdx;
@@ -179,14 +156,14 @@ public class OptionsMenu : ModOptions
 						presetObject.value = customPresetIdx;
 						suppressChangeEvent = false;
 						for ( int i = 0; i < sliders.Length; ++i ) {
-							writeSliderField(_custom, i, sliders[i].value);
-							writeSliderField(_current, i, sliders[i].value);
+							writeSliderField(_custom, fields[i], sliders[i].value);
+							writeSliderField(_current, fields[i], sliders[i].value);
 						}
 					}
-					writeSliderField(_custom, sliderIdx, x);
-					writeSliderField(_current, sliderIdx, x);
+					writeSliderField(_custom, fields[sliderIdx], x);
+					writeSliderField(_current, fields[sliderIdx], x);
 				};
-				sliders[sliderIdx] = panel.AddSliderOption(modsTabIndex, attr.Label, readSliderField(_custom, sliderIdx), attr.Min, attr.Max, attr.DefaultValue, attr.Step, onChange, typeToLabelMode(fields[sliderIdx].FieldType), attr.Format, attr.Tooltip)
+				sliders[sliderIdx] = panel.AddSliderOption(modsTabIndex, attr.Label, readSliderField(_custom, fields[sliderIdx]), attr.Min, attr.Max, attr.DefaultValue, attr.Step, onChange, typeToLabelMode(fields[sliderIdx].FieldType), attr.Format, attr.Tooltip)
 					.GetComponentInChildren<uGUI_SnappingSlider>();
 				break;
 			}
@@ -198,7 +175,7 @@ public class OptionsMenu : ModOptions
 		if ( _current is null )
 			return;
 
-		copy(Plugin.game, _current);
+		Plugin.game.copySettings(_current);
 		_current = null;
 
 		Plugin.debug("Applying new game settings");
@@ -345,6 +322,27 @@ public class ConfigGlobal : ConfigFile
 [FileName(Info.name)]
 public class ConfigPerSave : SaveDataCache
 {
+	public static readonly List<FieldInfo> fieldsSettings = new List<FieldInfo>(
+		from x in typeof(ConfigPerSave).GetFields(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly).AsEnumerable()
+		where x.GetCustomAttribute<SliderAttribute>() != null
+		select x);
+
+	public bool equalSettings(ConfigPerSave a)
+	{
+		foreach ( var field in fieldsSettings ) {
+			if ( !field.GetValue(this).Equals(field.GetValue(a)) )
+				return false;
+		}
+
+		return true;
+	}
+
+	public void copySettings(ConfigPerSave a)
+	{
+		foreach ( var field in fieldsSettings )
+			field.SetValue(this, field.GetValue(a));
+	}
+
 	/* The extreme DefaultValue is to mitigate subnautica defect in sliders where it snaps to the default value
 	 * For large ranges this snapping prevents selecting values near the default
 	 *
