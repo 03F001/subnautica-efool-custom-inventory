@@ -240,14 +240,14 @@ public class OptionsMenu : ModOptions
 [Menu(Info.title)]
 public class ConfigGlobal : ConfigFile
 {
-	[Slider("Inventory Max View Width", 6, 8, Step = 1, DefaultValue = 6), OnChange(nameof(syncScrollPanes))]
-	public int inventoryMaxView_width = 6;
+	[Slider("Inventory Max View Width", 6, 8, Step = 1, DefaultValue = 8), OnChange(nameof(syncScrollPanes))]
+	public int inventoryMaxView_width = 8; // base game defaults 6
 
 	[Slider("Inventory Max View Height", 6, 8, Step = 1, DefaultValue = 8), OnChange(nameof(syncScrollPanes))]
 	public int inventoryMaxView_height = 8;
 
-	[Slider("Storage Max View Width", 6, 8, Step = 1, DefaultValue = 6), OnChange(nameof(syncScrollPanes))]
-	public int storageMaxView_width = 6;
+	[Slider("Storage Max View Width", 6, 8, Step = 1, DefaultValue = 8), OnChange(nameof(syncScrollPanes))]
+	public int storageMaxView_width = 8; // base game defaults 6
 
 	[Slider("Storage Max View Height", 6, 8, Step = 1, DefaultValue = 8), OnChange(nameof(syncScrollPanes))]
 	public int storageMaxView_height = 8;
