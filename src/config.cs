@@ -303,13 +303,14 @@ public class ConfigGlobal : ConfigFile
 			r.sizeDelta = new Vector2(Plugin.config.scrollbarSize, 0);
 			scrollRect.verticalScrollbar.enabled = r.sizeDelta.x != 0;
 			scrollRect.verticalScrollbar.targetGraphic.gameObject.SetActive(scrollRect.verticalScrollbar.enabled);
-
 			var container = field_uGUI_ItemsContainer_container.GetValue(guiItemsContainer) as ItemsContainer;
-			var contentSize = new Vector2int(container.sizeX, container.sizeY);
-			var maxViewSize = isInventory
-				? new Vector2int(Plugin.config.inventoryMaxView_width, Plugin.config.inventoryMaxView_height)
-				: new Vector2int(Plugin.config.storageMaxView_width, Plugin.config.storageMaxView_height);
-			ScrollPane.init(guiItemsContainer, scrollRect, contentSize, maxViewSize);
+			if ( container != null ) {
+				var contentSize = new Vector2int(container.sizeX, container.sizeY);
+				var maxViewSize = isInventory
+					? new Vector2int(Plugin.config.inventoryMaxView_width, Plugin.config.inventoryMaxView_height)
+					: new Vector2int(Plugin.config.storageMaxView_width, Plugin.config.storageMaxView_height);
+				ScrollPane.init(guiItemsContainer, scrollRect, contentSize, maxViewSize);
+			}
 		}
 	}
 
