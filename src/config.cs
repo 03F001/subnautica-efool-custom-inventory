@@ -240,17 +240,17 @@ public class OptionsMenu : ModOptions
 [Menu(Info.title)]
 public class ConfigGlobal : ConfigFile
 {
-	[Slider("Inventory Max View Width", 6, 8, DefaultValue = 6), OnChange(nameof(syncScrollPanes))]
+	[Slider("Inventory Max View Width", 6, 8, Step = 1, DefaultValue = 6), OnChange(nameof(syncScrollPanes))]
 	public int inventoryMaxView_width = 6;
 
-	[Slider("Inventory Max View Height", 6, 8, DefaultValue = 6), OnChange(nameof(syncScrollPanes))]
-	public int inventoryMaxView_height = 6;
+	[Slider("Inventory Max View Height", 6, 8, Step = 1, DefaultValue = 8), OnChange(nameof(syncScrollPanes))]
+	public int inventoryMaxView_height = 8;
 
-	[Slider("Storage Max View Width", 6, 8, DefaultValue = 6), OnChange(nameof(syncScrollPanes))]
+	[Slider("Storage Max View Width", 6, 8, Step = 1, DefaultValue = 6), OnChange(nameof(syncScrollPanes))]
 	public int storageMaxView_width = 6;
 
-	[Slider("Storage Max View Height", 6, 8, DefaultValue = 6), OnChange(nameof(syncScrollPanes))]
-	public int storageMaxView_height = 6;
+	[Slider("Storage Max View Height", 6, 8, Step = 1, DefaultValue = 8), OnChange(nameof(syncScrollPanes))]
+	public int storageMaxView_height = 8;
 
 	[Slider("Scroll View Margin", 0, 256, DefaultValue = 256), OnChange(nameof(syncScrollPanes))]
 	public float viewMargin = 20.0f;
@@ -286,28 +286,36 @@ public class ConfigGlobal : ConfigFile
 	[Keybind("Pin item")]
 	public KeyCode keyPinItem = KeyCode.LeftAlt;
 
-	public void syncItemsContainer(uGUI_ItemsContainer itemsContainer)
+	private static readonly FieldInfo field_uGUI_ItemsContainer_container = typeof(uGUI_ItemsContainer).GetField("container", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+	public void syncItemsContainer(uGUI_ItemsContainer guiItemsContainer)
 	{
-		var m = itemsContainer.GetComponentInParent<RectMask2D>(true);
+		var isInventory = guiItemsContainer == guiItemsContainer.inventory.inventory;
+		var m = guiItemsContainer.GetComponentInParent<RectMask2D>(true);
 		if ( m ) {
-			if ( itemsContainer == itemsContainer.inventory )
-				m.padding = new Vector4(Plugin.config.inventoryMaskPadding_left, Plugin.config.inventoryMaskPadding_bottom, Plugin.config.inventoryMaskPadding_right, Plugin.config.inventoryMaskPadding_top);
-			else
-				m.padding = new Vector4(Plugin.config.storageMaskPadding_left, Plugin.config.storageMaskPadding_bottom, Plugin.config.storageMaskPadding_right, Plugin.config.storageMaskPadding_top);
+			m.padding = isInventory
+				? new Vector4(Plugin.config.inventoryMaskPadding_left, Plugin.config.inventoryMaskPadding_bottom, Plugin.config.inventoryMaskPadding_right, Plugin.config.inventoryMaskPadding_top)
+				: new Vector4(Plugin.config.storageMaskPadding_left, Plugin.config.storageMaskPadding_bottom, Plugin.config.storageMaskPadding_right, Plugin.config.storageMaskPadding_top);
 		}
 
-		var scrollRect = itemsContainer.GetComponentInParent<ScrollRect>(true);
+		var scrollRect = guiItemsContainer.GetComponentInParent<ScrollRect>(true);
 		if ( scrollRect ) {
 			var r = scrollRect.verticalScrollbar.transform as RectTransform;
 			r.sizeDelta = new Vector2(Plugin.config.scrollbarSize, 0);
 			scrollRect.verticalScrollbar.enabled = r.sizeDelta.x != 0;
 			scrollRect.verticalScrollbar.targetGraphic.gameObject.SetActive(scrollRect.verticalScrollbar.enabled);
+
+			var container = field_uGUI_ItemsContainer_container.GetValue(guiItemsContainer) as ItemsContainer;
+			var contentSize = new Vector2int(container.sizeX, container.sizeY);
+			var maxViewSize = isInventory
+				? new Vector2int(Plugin.config.inventoryMaxView_width, Plugin.config.inventoryMaxView_height)
+				: new Vector2int(Plugin.config.storageMaxView_width, Plugin.config.storageMaxView_height);
+			ScrollPane.init(guiItemsContainer, scrollRect, contentSize, maxViewSize);
 		}
 	}
 
 	public void syncScrollPanes()
 	{
- 		foreach ( var tab in Plugin.FindObjectsOfType<uGUI_InventoryTab>() ) {
+		foreach ( var tab in Plugin.FindObjectsOfType<uGUI_InventoryTab>() ) {
 			syncItemsContainer(tab.inventory);
 			syncItemsContainer(tab.storage);
 		}
@@ -359,8 +367,8 @@ public class ConfigPerSave : SaveDataCache
 
 	// inventory
 
-	[Slider("Inventory Width" , 1, 8  , DefaultValue = 6  )] public int inventory_width  = 6;
-	[Slider("Inventory Height", 1, max, DefaultValue = max)] public int inventory_height = 8;
+	[Slider("Inventory Width" , 1, 8  , Step = 1, DefaultValue = 6  )] public int inventory_width  = 6;
+	[Slider("Inventory Height", 1, max, Step = 1, DefaultValue = max)] public int inventory_height = 8;
 
 	// lockers
 

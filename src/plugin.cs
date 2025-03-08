@@ -50,7 +50,7 @@ public class Plugin : BaseUnityPlugin
 
 		ConsoleCommandsHandler.RegisterConsoleCommands(typeof(Commands));
 
-		SceneManager.sceneLoaded += new UnityAction<Scene, LoadSceneMode>(Patch.evtSceneLoaded);
+		SceneManager.sceneLoaded += new UnityAction<Scene, LoadSceneMode>(PinItem.evtSceneLoaded);
 
 		new Harmony(org.efool.subnautica.custom_inventory.Info.FQN).PatchAll();
 	}
@@ -281,68 +281,6 @@ static class Patch
 				+ (Plugin.game.exosuitStorageModule_height * __instance.modules.GetCount(TechType.VehicleStorageModule)));
 	}
 
-	static class ScrollPane
-	{
-		public static Vector2 viewportSize(Vector2int contentSize, Vector2int maxViewSize)
-		{
-			var w = Math.Min(contentSize.x, maxViewSize.x);
-			var h = Math.Min(contentSize.y, maxViewSize.y);
-			return new Vector2(w * uGUI_ItemsContainer.CellWidth + Plugin.config.viewMargin, h * uGUI_ItemsContainer.CellHeight + Plugin.config.viewMargin);
-		}
-
-		public static ScrollRect inject(uGUI_ItemsContainer __instance, string name)
-		{
-			GameObject scrollObject = new GameObject() { name = name };
-			scrollObject.transform.SetParent(__instance.transform.parent);
-			var viewport = scrollObject.AddComponent<RectTransform>();
-			viewport.CopyLocals(__instance.rectTransform);
-			__instance.transform.SetParent(scrollObject.transform);
-
-			{
-				var m = scrollObject.AddComponent<RectMask2D>();
-				m.padding = __instance == __instance.inventory
-					? new Vector4(Plugin.config.inventoryMaskPadding_left, Plugin.config.inventoryMaskPadding_bottom, Plugin.config.inventoryMaskPadding_right, Plugin.config.inventoryMaskPadding_top)
-					: new Vector4(Plugin.config.storageMaskPadding_left, Plugin.config.storageMaskPadding_bottom, Plugin.config.storageMaskPadding_right, Plugin.config.storageMaskPadding_top);
-			}
-
-			var scrollRect = scrollObject.AddComponent<ScrollRect>();
-			scrollRect.movementType = ScrollRect.MovementType.Clamped;
-			scrollRect.horizontal = true;
-			scrollRect.viewport = viewport;
-			scrollRect.content = __instance.rectTransform;
-			scrollRect.scrollSensitivity = uGUI_ItemsContainer.CellHeight;
-
-			scrollRect.verticalScrollbarSpacing = 0;
-			scrollRect.verticalScrollbarVisibility = ScrollRect.ScrollbarVisibility.AutoHide;
-			scrollRect.verticalScrollbar = UnityEngine.Object.Instantiate<GameObject>((Player.main.GetPDA().ui.tabEncyclopedia as uGUI_EncyclopediaTab).contentScrollRect.verticalScrollbar.gameObject, scrollRect.viewport).GetComponent<Scrollbar>();
-			{
-				var r = scrollRect.verticalScrollbar.transform as RectTransform;
-				r.anchorMin        = new Vector2(1, 0);
-				r.anchorMax        = new Vector2(1, 1);
-				r.pivot            = new Vector2(1, 1);
-				r.sizeDelta        = new Vector2(Plugin.config.scrollbarSize, 0);
-				r.anchoredPosition = new Vector2(0, 0);
-
-				scrollRect.verticalScrollbar.enabled = r.sizeDelta.x != 0;
-				scrollRect.verticalScrollbar.targetGraphic.gameObject.SetActive(scrollRect.verticalScrollbar.enabled);
-			}
-
-			return scrollRect;
-		}
-
-		public static void init(uGUI_ItemsContainer __instance, ScrollRect scrollRect, Vector2int contentSize, Vector2int maxViewSize)
-		{
-			scrollRect.viewport.sizeDelta = viewportSize(contentSize, maxViewSize);
-			__instance.rectTransform.anchorMin        = new Vector2(0.5f, 1);
-			__instance.rectTransform.anchorMax        = new Vector2(0.5f, 1);
-			__instance.rectTransform.pivot            = new Vector2(0.5f, 1);
-			__instance.rectTransform.anchoredPosition = new Vector2(0, 0);
-
-			scrollRect.verticalNormalizedPosition = 1;
-			scrollRect.horizontalNormalizedPosition = 0;
-		}
-	}
-
 	[HarmonyPostfix]
 	[HarmonyPatch(typeof(uGUI_InventoryTab), nameof(uGUI_InventoryTab.OnOpenPDA))]
 	public static void uGUI_InventoryTab_OnOpenPDA(uGUI_InventoryTab __instance)
@@ -385,27 +323,152 @@ static class Patch
 		__instance.GetComponentInParent<ScrollRect>(true)?.gameObject.SetActive(false);
 	}
 
-	private static string getId(InventoryItem item)
+	[HarmonyPostfix]
+	[HarmonyPatch(typeof(uGUI_ItemsContainer), "OnAddItem")]
+	public static void uGUI_ItemsContainer_OnAddItem(uGUI_ItemsContainer __instance, InventoryItem item)
+	{
+		PinItem.applyEffectPin(__instance, item, PinItem.isPinned(item));
+	}
+
+	[HarmonyPrefix]
+	[HarmonyPatch(typeof(uGUI_InventoryTab), nameof(uGUI_InventoryTab.OnPointerClick))]
+	public static bool uGUI_InventoryTab_OnPointerClick(uGUI_InventoryTab __instance, InventoryItem item, int button)
+	{
+		if ( ItemDragManager.isDragging )
+			return false;
+
+		var itemAction = Inventory.main.GetItemAction(item, button);
+		if ( Plugin.config.keyPinItem.GetKeyHeld() ) {
+			if ( button == 0 )
+				PinItem.handlePinItemAction(item);
+		}
+		else if ( itemAction != ItemAction.None && !PinItem.isPinned(item) ) {
+			PinItem.handleItemAction(item, itemAction);
+		}
+
+		__instance.equipment.ExtinguishSlots();
+
+		if ( itemAction != ItemAction.None || GameInput.GetPrimaryDevice() != GameInput.Device.Controller || button != 1 )
+			return false;
+
+		Player.main.GetPDA().Close();
+		return false;
+	}
+
+	[HarmonyPrefix]
+	[HarmonyPatch(typeof(InventoryItem), nameof(InventoryItem.CanDrag))]
+	public static bool InventoryItem_CanDrag(ref bool __result, InventoryItem __instance, bool verbose)
+	{
+		if ( PinItem.isPinned(__instance) ) {
+			__result = false;
+			return false;
+		}
+
+		return true;
+	}
+
+	[HarmonyPostfix]
+	[HarmonyPatch(typeof(Inventory), nameof(Inventory.GetAllItemActions))]
+	public static void Inventory_GetAllItemActions(ref ItemAction __result, Inventory __instance, InventoryItem item)
+	{
+		const ItemAction disallowed = ItemAction.Use
+			| ItemAction.Eat
+			| ItemAction.Equip
+			| ItemAction.Unequip
+			| ItemAction.Switch
+			| ItemAction.Swap
+			| ItemAction.Drop;
+		if ( PinItem.isPinned(item) )
+			__result = __result & ~disallowed;
+	}
+}
+
+public static class ScrollPane
+{
+	public static Vector2 viewportSize(Vector2int contentSize, Vector2int maxViewSize)
+	{
+		var w = Math.Min(contentSize.x, maxViewSize.x);
+		var h = Math.Min(contentSize.y, maxViewSize.y);
+		return new Vector2(w * uGUI_ItemsContainer.CellWidth + Plugin.config.viewMargin, h * uGUI_ItemsContainer.CellHeight + Plugin.config.viewMargin);
+	}
+
+	public static ScrollRect inject(uGUI_ItemsContainer guiItemsContainer, string name)
+	{
+		GameObject scrollObject = new GameObject() { name = name };
+		scrollObject.transform.SetParent(guiItemsContainer.transform.parent);
+		var viewport = scrollObject.AddComponent<RectTransform>();
+		viewport.CopyLocals(guiItemsContainer.rectTransform);
+		guiItemsContainer.transform.SetParent(scrollObject.transform);
+
+		{
+			var m = scrollObject.AddComponent<RectMask2D>();
+			m.padding = guiItemsContainer == guiItemsContainer.inventory
+				? new Vector4(Plugin.config.inventoryMaskPadding_left, Plugin.config.inventoryMaskPadding_bottom, Plugin.config.inventoryMaskPadding_right, Plugin.config.inventoryMaskPadding_top)
+				: new Vector4(Plugin.config.storageMaskPadding_left, Plugin.config.storageMaskPadding_bottom, Plugin.config.storageMaskPadding_right, Plugin.config.storageMaskPadding_top);
+		}
+
+		var scrollRect = scrollObject.AddComponent<ScrollRect>();
+		scrollRect.movementType = ScrollRect.MovementType.Clamped;
+		scrollRect.horizontal = true;
+		scrollRect.viewport = viewport;
+		scrollRect.content = guiItemsContainer.rectTransform;
+		scrollRect.scrollSensitivity = uGUI_ItemsContainer.CellHeight;
+
+		scrollRect.verticalScrollbarSpacing = 0;
+		scrollRect.verticalScrollbarVisibility = ScrollRect.ScrollbarVisibility.AutoHide;
+		scrollRect.verticalScrollbar = UnityEngine.Object.Instantiate<GameObject>((Player.main.GetPDA().ui.tabEncyclopedia as uGUI_EncyclopediaTab).contentScrollRect.verticalScrollbar.gameObject, scrollRect.viewport).GetComponent<Scrollbar>();
+		{
+			var r = scrollRect.verticalScrollbar.transform as RectTransform;
+			r.anchorMin        = new Vector2(1, 0);
+			r.anchorMax        = new Vector2(1, 1);
+			r.pivot            = new Vector2(1, 1);
+			r.sizeDelta        = new Vector2(Plugin.config.scrollbarSize, 0);
+			r.anchoredPosition = new Vector2(0, 0);
+
+			scrollRect.verticalScrollbar.enabled = r.sizeDelta.x != 0;
+			scrollRect.verticalScrollbar.targetGraphic.gameObject.SetActive(scrollRect.verticalScrollbar.enabled);
+		}
+
+		return scrollRect;
+	}
+
+	public static void init(uGUI_ItemsContainer guiItemsContainer, ScrollRect scrollRect, Vector2int contentSize, Vector2int maxViewSize)
+	{
+		scrollRect.viewport.sizeDelta = viewportSize(contentSize, maxViewSize);
+		guiItemsContainer.rectTransform.anchorMin        = new Vector2(0.5f, 1);
+		guiItemsContainer.rectTransform.anchorMax        = new Vector2(0.5f, 1);
+		guiItemsContainer.rectTransform.pivot            = new Vector2(0.5f, 1);
+		guiItemsContainer.rectTransform.anchoredPosition = new Vector2(0, 0);
+
+		scrollRect.verticalNormalizedPosition = 1;
+		scrollRect.horizontalNormalizedPosition = 0;
+	}
+}
+
+public static class PinItem
+{
+	public static GameObject _pinReference;
+
+	public static string getId(InventoryItem item)
 	{
 		return item.item.GetComponent<UniqueIdentifier>().Id;
 	}
 
-	private static bool isPinned(InventoryItem item)
+	public static bool isPinned(InventoryItem item)
 	{
 		return Plugin.game.inventoryPinnedItems.Contains(getId(item));
 	}
 
-	private static void pin(InventoryItem item)
+	public static void pin(InventoryItem item)
 	{
 		Plugin.game.inventoryPinnedItems.Add(getId(item));
 	}
 
-	private static void unpin(InventoryItem item)
+	public static void unpin(InventoryItem item)
 	{
 		Plugin.game.inventoryPinnedItems.Remove(getId(item));
 	}
 
-	private static GameObject _pinReference;
 	public static void evtSceneLoaded(Scene scene, LoadSceneMode mode)
 	{
 		if ( _pinReference == null && Player.main != null ) {
@@ -425,7 +488,7 @@ static class Patch
 		}
 	}
 
-	private static void applyEffectPin(uGUI_ItemsContainer container, InventoryItem item, bool on = true)
+	public static void applyEffectPin(uGUI_ItemsContainer container, InventoryItem item, bool on = true)
 	{
 		if ( _pinReference == null )
 			return;
@@ -446,14 +509,7 @@ static class Patch
 		}
 	}
 
-	[HarmonyPostfix]
-	[HarmonyPatch(typeof(uGUI_ItemsContainer), "OnAddItem")]
-	public static void uGUI_ItemsContainer_OnAddItem(uGUI_ItemsContainer __instance, InventoryItem item)
-	{
-		applyEffectPin(__instance, item, isPinned(item));
-	}
-
-	private static void handlePinItemAction(InventoryItem item)
+	public static void handlePinItemAction(InventoryItem item)
 	{
 		if ( !item.isEnabled )
 			return;
@@ -495,7 +551,7 @@ static class Patch
 		}
 	}
 
-	private static void handleItemAction(InventoryItem item, ItemAction itemAction)
+	public static void handleItemAction(InventoryItem item, ItemAction itemAction)
 	{
 		var targetItems = new List<InventoryItem>();
 		if ( Plugin.config.keyMoveAllItems.GetKeyHeld() ) {
@@ -517,58 +573,6 @@ static class Patch
 
 		foreach ( var e in targetItems )
 			Inventory.main.ExecuteItemAction(itemAction, e);
-	}
-
-	[HarmonyPrefix]
-	[HarmonyPatch(typeof(uGUI_InventoryTab), nameof(uGUI_InventoryTab.OnPointerClick))]
-	public static bool uGUI_InventoryTab_OnPointerClick(uGUI_InventoryTab __instance, InventoryItem item, int button)
-	{
-		if ( ItemDragManager.isDragging )
-			return false;
-
-		var itemAction = Inventory.main.GetItemAction(item, button);
-		if ( Plugin.config.keyPinItem.GetKeyHeld() ) {
-			if ( button == 0 )
-				handlePinItemAction(item);
-		}
-		else if ( itemAction != ItemAction.None && !isPinned(item) ) {
-			handleItemAction(item, itemAction);
-		}
-
-		__instance.equipment.ExtinguishSlots();
-
-		if ( itemAction != ItemAction.None || GameInput.GetPrimaryDevice() != GameInput.Device.Controller || button != 1 )
-			return false;
-
-		Player.main.GetPDA().Close();
-		return false;
-	}
-
-	[HarmonyPrefix]
-	[HarmonyPatch(typeof(InventoryItem), nameof(InventoryItem.CanDrag))]
-	public static bool InventoryItem_CanDrag(ref bool __result, InventoryItem __instance, bool verbose)
-	{
-		if ( isPinned(__instance) ) {
-			__result = false;
-			return false;
-		}
-
-		return true;
-	}
-
-	[HarmonyPostfix]
-	[HarmonyPatch(typeof(Inventory), nameof(Inventory.GetAllItemActions))]
-	public static void Inventory_GetAllItemActions(ref ItemAction __result, Inventory __instance, InventoryItem item)
-	{
-		const ItemAction disallowed = ItemAction.Use
-			| ItemAction.Eat
-			| ItemAction.Equip
-			| ItemAction.Unequip
-			| ItemAction.Switch
-			| ItemAction.Swap
-			| ItemAction.Drop;
-		if ( isPinned(item) )
-			__result = __result & ~disallowed;
 	}
 }
 
