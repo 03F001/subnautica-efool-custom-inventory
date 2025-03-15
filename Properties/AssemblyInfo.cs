@@ -25,6 +25,6 @@ public static class Info
 	public const string name = "efool-custom-inventory";
 	public const string title = "efool's Custom Inventory";
 	public const string desc = "efool's custom inventory mod for Subnautica";
-	public const string version = "0.0.1";
+	public const string version = "0.0.2";
 }
 }
