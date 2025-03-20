@@ -25,7 +25,7 @@ public class Plugin : BaseUnityPlugin
 {
 	public static ConfigGlobal config { get; private set;}
 	public static OptionsMenu optionsMenu { get; private set; }
-	public static ConfigPerSave game { get; } = SaveDataHandler.RegisterSaveDataCache<ConfigPerSave>();
+	public static ConfigPerSave game { get; private set; }
 
 	public static ManualLogSource log;
 	public static void debug(string txt)
@@ -45,7 +45,16 @@ public class Plugin : BaseUnityPlugin
 		optionsMenu = new OptionsMenu(config);
 		OptionsPanelHandler.RegisterModOptions(optionsMenu);
 
+		SaveUtils.RegisterOnStartLoadingEvent(() => {
+			game = new ConfigPerSave();
+			if ( !config.presetDefault.IsNullOrWhiteSpace() ) {
+				ConfigPerSave.loadPresets();
+				game.copySettings(ConfigPerSave.presets.GetOrDefault(config.presetDefault, ConfigPerSave.default_));
+			}
+			game.Load();
+		});
 		SaveUtils.RegisterOnFinishLoadingEvent(() => optionsMenu.inGame = true);
+		SaveUtils.RegisterOnSaveEvent(() => game.Save());
 		SaveUtils.RegisterOnQuitEvent(() => optionsMenu.inGame = false);
 
 		ConsoleCommandsHandler.RegisterConsoleCommands(typeof(Commands));

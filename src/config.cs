@@ -20,7 +20,6 @@ namespace org.efool.subnautica.custom_inventory {
 
 public class OptionsMenu : ModOptions
 {
-	private static readonly ConfigPerSave _default = new ConfigPerSave();
 	private ConfigPerSave _custom = new ConfigPerSave();
 	private ConfigPerSave _current;
 
@@ -88,37 +87,51 @@ public class OptionsMenu : ModOptions
 
 	public override void BuildModOptions(uGUI_TabbedControlsPanel panel, int modsTabIndex, IReadOnlyCollection<OptionItem> options)
 	{
-		base.BuildModOptions(panel, modsTabIndex, options);
-		if ( !inGame )
-			return;
-
-		panel.AddHeading(modsTabIndex, Info.title + " Per Save Options");
 		var presetConfigs = new List<ConfigPerSave> {
-			_default,
+			ConfigPerSave.default_,
 			_custom,
 		};
-		var presets = new List<string>{
+		var presetChoices = new List<string>{
 			"Default",
 			"Custom",
+		};
+		var presetDefaultChoices = new List<string>{
+			"Default"
 		};
 		//const int defaultPresetIdx = 0;
 		const int customPresetIdx = 1;
 		
-		{
-			_custom.copySettings(Plugin.game);
-
-			var presetsPath = Path.Combine(Path.GetDirectoryName(typeof(Plugin).Assembly.Location), "presets.json");
-			if ( File.Exists(presetsPath) ) {
-				var dict = JsonConvert.DeserializeObject<Dictionary<string, ConfigPerSave>>(File.ReadAllText(presetsPath));
-				foreach ( var entry in dict ) {
-					presets.Add(entry.Key);
-					presetConfigs.Add(entry.Value);
-				}
-			}
+		ConfigPerSave.loadPresets();
+		foreach ( var entry in ConfigPerSave.presets ) {
+			presetChoices.Add(entry.Key);
+			presetConfigs.Add(entry.Value);
+			presetDefaultChoices.Add(entry.Key);
 		}
 
+		// inlined base.BuildModOptions(panel, modsTabIndex, options); to deal with ChoiceOption.
+		// Calls into question the utility of list of OptionItems (options) made in the ctor.
+		panel.AddHeading(modsTabIndex, Name);
+		panel.AddChoiceOption(
+			tabIndex: modsTabIndex,
+			label: "Default Preset",
+			items: presetDefaultChoices.ToArray(),
+			currentIndex: Math.Max(0, presetDefaultChoices.FindIndex(1, x => x == Plugin.config.presetDefault)),
+			callback: (int idx) =>
+				Plugin.config.presetDefault = Plugin.config.presetDefault = idx == 0
+					? ""
+					: presetDefaultChoices[idx],
+			tooltip: "Default preset to use when starting a new game save");
+		options.ForEach(option => option.AddToPanel(panel, modsTabIndex));
+
+		if ( !inGame )
+			return;
+
+		panel.AddHeading(modsTabIndex, Info.title + " Per Save Options");
+
+		_custom.copySettings(Plugin.game);
+
 		var presetIdx = 0;
-		if ( !Plugin.game.equalSettings(_default) ) {
+		if ( !Plugin.game.equalSettings(ConfigPerSave.default_) ) {
 			presetIdx = presetConfigs.FindIndex(customPresetIdx + 1, x => x.equalSettings(Plugin.game));
 			if ( presetIdx == -1 )
 				presetIdx = customPresetIdx;
@@ -140,7 +153,7 @@ public class OptionsMenu : ModOptions
 
 			_current.copySettings(presetConfigs[idx]);
 		};
-		var presetObject = panel.AddChoiceOption(modsTabIndex, "Preset", presets.ToArray(), presetIdx, callback: onPreset).GetComponentInChildren<uGUI_Choice>();
+		var presetObject = panel.AddChoiceOption(modsTabIndex, "Preset", presetChoices.ToArray(), presetIdx, callback: onPreset).GetComponentInChildren<uGUI_Choice>();
 
 		for ( int fieldIdx = 0; fieldIdx < fields.Count; ++fieldIdx ) {
 			switch ( fields[fieldIdx].GetCustomAttribute<ModOptionAttribute>() ) {
@@ -180,6 +193,11 @@ public class OptionsMenu : ModOptions
 
 		Plugin.debug("Applying new game settings");
 
+		applyAll();
+	}
+
+	public static void applyAll()
+	{
 		applyInventory();
 		applyStorageContainer();
 		applyBioreactor();
@@ -240,6 +258,8 @@ public class OptionsMenu : ModOptions
 [Menu(Info.title)]
 public class ConfigGlobal : ConfigFile
 {
+	public string presetDefault = "";
+
 	[Slider("Inventory Max View Width", 6, 8, Step = 1, DefaultValue = 8), OnChange(nameof(syncScrollPanes))]
 	public int inventoryMaxView_width = 8; // base game defaults 6
 
@@ -350,6 +370,31 @@ public class ConfigPerSave : SaveDataCache
 	{
 		foreach ( var field in fieldsSettings )
 			field.SetValue(this, field.GetValue(a));
+	}
+
+	public static readonly ConfigPerSave default_ = new ConfigPerSave();
+	public static DateTime presetsLastAccess;
+	public static Dictionary<string, ConfigPerSave> presets;
+	public static bool loadPresets()
+	{
+		var presetsPath = Path.Combine(Path.GetDirectoryName(typeof(Plugin).Assembly.Location), "presets.json");
+		if ( File.Exists(presetsPath) ) {
+			var lastAccess = new FileInfo(presetsPath).LastWriteTime;
+			if ( lastAccess != presetsLastAccess ) {
+				presetsLastAccess = lastAccess;
+				try {
+					presets = JsonConvert.DeserializeObject<Dictionary<string, ConfigPerSave>>(File.ReadAllText(presetsPath));
+				}
+				catch (Exception e) {
+					presets = new Dictionary<string, ConfigPerSave>();
+					Plugin.log.LogError(e);
+				}
+
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/* The extreme DefaultValue is to mitigate subnautica defect in sliders where it snaps to the default value
